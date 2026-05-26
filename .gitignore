@@ -1,0 +1,25 @@
+# env
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# vector DB
+chroma_db/
+
+# data (PDF raw files)
+data/pdfs/
+
+# logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# secrets
+.env
