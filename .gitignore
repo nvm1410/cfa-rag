@@ -23,3 +23,11 @@ Thumbs.db
 
 # secrets
 .env
+
+# runtime DB
+app.db
+
+# cfa-rag-ui
+cfa-rag-ui/node_modules/
+cfa-rag-ui/dist/
+cfa-rag-ui/*.tsbuildinfo
