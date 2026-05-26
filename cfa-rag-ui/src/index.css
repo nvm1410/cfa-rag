@@ -247,6 +247,23 @@ body {
   min-width: 0;
 }
 
+.sidebar-edit-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 13px;
+  font-family: var(--font);
+  outline: none;
+}
+
+.sidebar-edit-input:focus {
+  border-color: #fff;
+}
+
 .sidebar-item-del {
   background: none;
   border: none;
@@ -404,9 +421,69 @@ body {
 .message-content {
   font-size: 15px;
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
   max-width: 85%;
+}
+
+.message-content p {
+  margin-bottom: 8px;
+}
+
+.message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.message-content ul,
+.message-content ol {
+  padding-left: 20px;
+  margin-bottom: 8px;
+}
+
+.message-content li {
+  margin-bottom: 4px;
+}
+
+.message-content code {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 13px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.message-content pre {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin-bottom: 8px;
+}
+
+.message-content pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+.message-user .message-content {
+  background: var(--c-user-bubble);
+  color: var(--c-user-text);
+  padding: 10px 16px;
+  border-radius: 16px 16px 4px 16px;
+}
+
+.message-user .message-content code {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.message-user .message-content pre {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.message-assistant .message-content {
+  background: var(--c-assistant-bg);
+  padding: 10px 16px;
+  border-radius: 16px 16px 16px 4px;
 }
 
 .message-user .message-content {
@@ -431,6 +508,25 @@ body {
   text-align: center;
   padding: 16px 24px;
   color: var(--c-error);
+  font-size: 14px;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--c-border);
+  border-top-color: var(--c-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 0 auto 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  color: var(--c-text-secondary);
   font-size: 14px;
 }
 

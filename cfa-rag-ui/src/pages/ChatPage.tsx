@@ -47,31 +47,72 @@ export default function ChatPage() {
       .finally(() => setLoadingMessages(false))
   }, [activeId, token])
 
+  const handleSelect = useCallback((id: string) => {
+    setMessages([])
+    setError(null)
+    setActiveId(id)
+    setSidebarOpen(false)
+  }, [])
+
   const handleNew = useCallback(async () => {
     if (!token) return
+    const tempId = `new-${Date.now()}`
+    const optimistic: ChatSession = {
+      id: tempId,
+      title: 'New Chat',
+      summary: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    setSessions(prev => [optimistic, ...prev])
+    setMessages([])
+    setError(null)
+    setActiveId(tempId)
+    setSidebarOpen(false)
     try {
       const session = await api.createSession(token)
-      setSessions(prev => [session, ...prev])
-      setActiveId(session.id)
-      setSidebarOpen(false)
+      setSessions(prev => prev.map(s => s.id === tempId ? session : s))
+      if (activeId === tempId) setActiveId(session.id)
     } catch {
-      // ignore
+      setSessions(prev => prev.filter(s => s.id !== tempId))
+      if (activeId === tempId) {
+        setActiveId(null)
+      }
     }
-  }, [token])
+  }, [token, activeId])
 
   const handleDelete = useCallback(async (id: string) => {
     if (!token) return
+    const prevSessions = sessions
+    const prevActiveId = activeId
+    // Optimistic update
+    setSessions(prev => prev.filter(s => s.id !== id))
+    if (activeId === id) {
+      setActiveId(null)
+      setMessages([])
+    }
     try {
       await api.deleteSession(id, token)
-      setSessions(prev => prev.filter(s => s.id !== id))
-      if (activeId === id) {
-        setActiveId(null)
-        setMessages([])
-      }
     } catch {
-      // ignore
+      // Roll back on failure
+      setSessions(prevSessions)
+      if (prevActiveId !== null) setActiveId(prevActiveId)
     }
-  }, [token, activeId])
+  }, [token, activeId, sessions])
+
+  const handleRename = useCallback(async (id: string, title: string) => {
+    if (!token) return
+    // Optimistic update
+    setSessions(prev => prev.map(s => s.id === id ? { ...s, title } : s))
+    try {
+      const updated = await api.updateTitle(id, title, token)
+      setSessions(prev => prev.map(s => s.id === id ? updated : s))
+    } catch {
+      // Refresh sessions to revert on failure
+      const refreshed = await api.listSessions(token)
+      setSessions(refreshed)
+    }
+  }, [token])
 
   const handleSend = useCallback(async (question: string) => {
     if (!token || !activeId) return
@@ -112,9 +153,10 @@ export default function ChatPage() {
       <Sidebar
         sessions={sessions}
         activeId={activeId}
-        onSelect={setActiveId}
+        onSelect={handleSelect}
         onNew={handleNew}
         onDelete={handleDelete}
+        onRename={handleRename}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         loading={loadingSessions}
@@ -135,6 +177,7 @@ export default function ChatPage() {
         <MessageList
           messages={messages}
           loading={sending}
+          fetching={loadingMessages}
           error={error}
         />
 

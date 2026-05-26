@@ -1,13 +1,16 @@
 import { useEffect, useRef } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { Message } from '../types'
 
 interface MessageListProps {
   messages: Message[]
   loading: boolean
+  fetching: boolean
   error: string | null
 }
 
-export default function MessageList({ messages, loading, error }: MessageListProps) {
+export default function MessageList({ messages, loading, fetching, error }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -23,6 +26,16 @@ export default function MessageList({ messages, loading, error }: MessageListPro
   }
 
   if (messages.length === 0) {
+    if (fetching) {
+      return (
+        <div className="messages">
+          <div className="messages-empty">
+            <div className="spinner" />
+            <p className="loading-text">Loading messages…</p>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="messages">
         <div className="messages-empty">
@@ -38,7 +51,9 @@ export default function MessageList({ messages, loading, error }: MessageListPro
       {messages.map((m, i) => (
         <div key={i} className={`message message-${m.role}`}>
           <div className="message-avatar">{m.role === 'user' ? 'U' : 'A'}</div>
-          <div className="message-content">{m.content}</div>
+          <div className="message-content">
+            <Markdown remarkPlugins={[remarkGfm]}>{m.content}</Markdown>
+          </div>
         </div>
       ))}
       {loading && (

@@ -53,6 +53,9 @@ export const api = {
   deleteSession: (id: string, token: string) =>
     request<void>('DELETE', `/sessions/${id}`, undefined, token),
 
+  updateTitle: (id: string, title: string, token: string) =>
+    request<ChatSession>('PATCH', `/sessions/${id}/title?title=${encodeURIComponent(title)}`, undefined, token),
+
   ask: (sessionId: string, question: string, token: string) =>
     request<ChatResponse>('POST', `/chat/sessions/${sessionId}/ask`, { question }, token),
 }

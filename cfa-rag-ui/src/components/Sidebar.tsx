@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect, type KeyboardEvent } from 'react'
 import type { ChatSession } from '../types'
 import { useAuth } from '../context/AuthContext'
 
@@ -7,9 +8,68 @@ interface SidebarProps {
   onSelect: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
+  onRename: (id: string, title: string) => void
   open: boolean
   onClose: () => void
   loading: boolean
+}
+
+function EditableTitle({
+  session,
+  onRename,
+}: {
+  session: ChatSession
+  onRename: (id: string, title: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(session.title)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus()
+  }, [editing])
+
+  useEffect(() => {
+    setDraft(session.title)
+  }, [session.title])
+
+  function save() {
+    const t = draft.trim()
+    if (t && t !== session.title) {
+      onRename(session.id, t)
+    } else {
+      setDraft(session.title)
+    }
+    setEditing(false)
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Enter') { e.preventDefault(); save() }
+    if (e.key === 'Escape') { setDraft(session.title); setEditing(false) }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="sidebar-edit-input"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={handleKeyDown}
+        onClick={e => e.stopPropagation()}
+      />
+    )
+  }
+
+  return (
+    <span
+      className="sidebar-item-title"
+      onDoubleClick={e => { e.stopPropagation(); setEditing(true) }}
+    >
+      {session.title}
+    </span>
+  )
 }
 
 export default function Sidebar({
@@ -18,6 +78,7 @@ export default function Sidebar({
   onSelect,
   onNew,
   onDelete,
+  onRename,
   open,
   onClose,
   loading,
@@ -47,7 +108,7 @@ export default function Sidebar({
               className={`sidebar-item ${s.id === activeId ? 'active' : ''}`}
               onClick={() => { onSelect(s.id); onClose() }}
             >
-              <span className="sidebar-item-title">{s.title}</span>
+              <EditableTitle session={s} onRename={onRename} />
               <button
                 className="sidebar-item-del"
                 onClick={e => { e.stopPropagation(); onDelete(s.id) }}
