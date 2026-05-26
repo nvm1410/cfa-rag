@@ -3,10 +3,12 @@ import re
 import json
 import chromadb
 import numpy as np
+import httpx
+import time
 
 from rank_bm25 import BM25Okapi
 from transformers import AutoTokenizer
-from FlagEmbedding import BGEM3FlagModel, FlagReranker
+from FlagEmbedding import FlagModel
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -14,24 +16,93 @@ from app.query_expansion import expand_query, ExpandedQuery
 
 load_dotenv()
 
-CHROMA_PATH = "./chroma_db"
+CHROMA_PATH  = "./chroma_db"
+HF_TOKEN     = os.getenv("HF_TOKEN")
+RERANKER_URL = os.getenv("HF_RERANKER_URL")
+
+
+# =========================================================
+# RERANKER (HF Endpoint)
+# =========================================================
+reranker_tokenizer = AutoTokenizer.from_pretrained(
+    "BAAI/bge-reranker-v2-m3"
+)
+
+MAX_RERANK_TOKENS    = 512
+RERANKER_SPECIAL_TOKENS = 4
+
+
+def truncate_for_reranker(query: str, text: str) -> str:
+    query_tokens = reranker_tokenizer.encode(
+        query,
+        add_special_tokens=False,
+    )
+    budget = MAX_RERANK_TOKENS - len(query_tokens) - RERANKER_SPECIAL_TOKENS
+
+    text_tokens = reranker_tokenizer.encode(
+        text,
+        add_special_tokens=False,
+    )
+    if len(text_tokens) <= budget:
+        return text
+
+    return reranker_tokenizer.decode(
+        text_tokens[:budget],
+        skip_special_tokens=True,
+    )
+
+
+def rerank_via_hf(
+    query: str,
+    texts: list[str],
+    max_retries: int = 5,
+    initial_wait: float = 5.0,
+    batch_size: int = 32,
+) -> list[float]:
+    wait = initial_wait
+
+    # split thành batches <= 32
+    all_scores: list[float] = []
+
+    for batch_start in range(0, len(texts), batch_size):
+        batch = texts[batch_start: batch_start + batch_size]
+
+        for attempt in range(max_retries):
+            res = httpx.post(
+                RERANKER_URL,
+                headers={"Authorization": f"Bearer {HF_TOKEN}"},
+                json={"query": query, "texts": batch},
+                timeout=60,
+            )
+
+            if res.status_code == 503:
+                print(f"[RERANKER] cold start, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+                wait *= 2
+                continue
+
+            if res.status_code == 422:
+                print(f"[RERANKER] 422 body: {res.text}")
+
+            res.raise_for_status()
+
+            results = sorted(res.json(), key=lambda x: x["index"])
+            all_scores.extend([r["score"] for r in results])
+            break
+
+        else:
+            raise RuntimeError("HF reranker unavailable after max retries")
+
+    return all_scores
 
 
 # =========================================================
 # MODELS
 # =========================================================
-embedding_model = BGEM3FlagModel(
-    "BAAI/bge-m3",
+embedding_model = FlagModel(
+    "BAAI/bge-small-en-v1.5",
+    query_instruction_for_retrieval="Represent this sentence for searching relevant passages:",
     use_fp16=True,
-)
-
-reranker = FlagReranker(
-    "BAAI/bge-reranker-v2-m3",
-    use_fp16=True,
-)
-
-reranker_tokenizer = AutoTokenizer.from_pretrained(
-    "BAAI/bge-reranker-v2-m3"
 )
 
 llm = OpenAI(
@@ -39,9 +110,8 @@ llm = OpenAI(
     base_url="https://api.deepseek.com",
 )
 
-client = chromadb.PersistentClient(path=CHROMA_PATH)
+client     = chromadb.PersistentClient(path=CHROMA_PATH)
 collection = client.get_collection("cfa_docs")
-
 
 # =========================================================
 # BM25
@@ -52,20 +122,20 @@ def tokenize(text: str) -> list[str]:
 
 class BM25Index:
     def __init__(self):
-        self.texts:     list[str] = []
-        self.metadatas: list[dict] = []
-        self.ids:       list[str] = []
+        self.texts:     list[str]        = []
+        self.metadatas: list[dict]       = []
+        self.ids:       list[str]        = []
         self.bm25:      BM25Okapi | None = None
 
     def build(self):
         data = collection.get()
 
-        self.texts = data["documents"]
+        self.texts     = data["documents"]
         self.metadatas = data["metadatas"]
-        self.ids = data["ids"]
+        self.ids       = data["ids"]
 
         tokenized = [tokenize(t) for t in self.texts]
-        self.bm25 = BM25Okapi(tokenized)
+        self.bm25  = BM25Okapi(tokenized)
 
         print(f"[BM25] built: {len(self.texts)} chunks")
 
@@ -73,7 +143,7 @@ class BM25Index:
         if self.bm25 is None:
             self.build()
 
-        scores = self.bm25.get_scores(tokenize(query))
+        scores  = self.bm25.get_scores(tokenize(query))
         top_idx = np.argsort(scores)[::-1][:k]
 
         return [
@@ -167,8 +237,8 @@ def route_query(query: str) -> dict:
                 {"role": "user",   "content": query},
             ],
         )
-        raw = res.choices[0].message.content
-        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
+        raw  = res.choices[0].message.content
+        raw  = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
         data = json.loads(raw)
 
     except Exception:
@@ -198,10 +268,7 @@ def vector_search(
     where: dict | None = None,
 ) -> list[dict]:
 
-    q_emb = embedding_model.encode(
-        [query],
-        return_dense=True,
-    )["dense_vecs"][0]
+    q_emb = embedding_model.encode_queries([query])[0]
 
     res = collection.query(
         query_embeddings=[q_emb.tolist()],
@@ -210,9 +277,9 @@ def vector_search(
         include=["documents", "metadatas", "distances"],
     )
 
-    docs = res["documents"][0]
+    docs  = res["documents"][0]
     metas = res["metadatas"][0]
-    ids = res["ids"][0]
+    ids   = res["ids"][0]
     dists = res["distances"][0]
 
     return [
@@ -232,7 +299,7 @@ def vector_search(
 def rrf(
     vec_results:  list[dict],
     bm25_results: list[dict],
-    k:     int = 60,
+    k:     int   = 60,
     w_vec: float = 1.0,
     w_bm:  float = 1.0,
 ) -> list[dict]:
@@ -342,36 +409,17 @@ def hybrid_search(
 # =========================================================
 # RERANK
 # =========================================================
-MAX_RERANK_TOKENS = 400  # buffer for query + special tokens
-
-
-def truncate_for_reranker(text: str) -> str:
-    tokens = reranker_tokenizer.encode(
-        text,
-        add_special_tokens=False,
-    )
-    if len(tokens) <= MAX_RERANK_TOKENS:
-        return text
-    return reranker_tokenizer.decode(
-        tokens[:MAX_RERANK_TOKENS],
-        skip_special_tokens=True,
-    )
-
-
 def rerank(
-    query:  str,
-    docs:   list[dict],
-    top_k:  int = 15,
+    query: str,
+    docs:  list[dict],
+    top_k: int = 15,
 ) -> list[dict]:
 
     if not docs:
         return []
 
-    pairs = [
-        [query, truncate_for_reranker(d["text"])]
-        for d in docs
-    ]
-    scores = reranker.compute_score(pairs)
+    texts  = [truncate_for_reranker(query, d["text"]) for d in docs]
+    scores = rerank_via_hf(query, texts)
 
     for i, s in enumerate(scores):
         docs[i]["rerank_score"] = float(s)
@@ -391,17 +439,16 @@ def retrieval_confident(docs: list[dict]) -> bool:
         return False
 
     scores = [d["rerank_score"] for d in docs]
-    top = scores[0]
+    top    = scores[0]
 
-    # absolute floor: clearly irrelevant
-    if top < -2:
+    # HF reranker trả 0-1
+    if top < 0.01:
         return False
 
-    # relative threshold: top doc must stand out from batch mean
     if len(docs) > 1:
         mean = sum(scores) / len(scores)
-        gap = top - scores[1]
-        if top < mean + 0.5 and gap < 0.15:
+        gap  = top - scores[1]
+        if top < mean + 0.1 and gap < 0.05:
             return False
 
     return True
@@ -414,7 +461,7 @@ def build_context(docs: list[dict]) -> str:
     parts = []
 
     for i, d in enumerate(docs, 1):
-        src = d["meta"].get("source", "unknown")
+        src  = d["meta"].get("source", "unknown")
         page = d["meta"].get("page", "?")
         parts.append(
             f"[{i}] (Source: {src}, p.{page})\n"
@@ -526,7 +573,7 @@ def ask_rag(query: str) -> dict:
             "route": route,
         }
 
-    difficulty = route["difficulty"]
+    difficulty     = route["difficulty"]
     reasoning_mode = route["reasoning_mode"]
 
     # -------------------------------------------------
@@ -582,9 +629,9 @@ def ask_rag(query: str) -> dict:
     # -------------------------------------------------
     # 7. FINAL CONTEXT
     # -------------------------------------------------
-    final_k = _FINAL_DOCS_K.get(reasoning_mode, 6)
+    final_k    = _FINAL_DOCS_K.get(reasoning_mode, 6)
     final_docs = reranked[:final_k]
-    context = build_context(final_docs)
+    context    = build_context(final_docs)
 
     # -------------------------------------------------
     # 8. GENERATION
