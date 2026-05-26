@@ -56,30 +56,17 @@ export default function ChatPage() {
 
   const handleNew = useCallback(async () => {
     if (!token) return
-    const tempId = `new-${Date.now()}`
-    const optimistic: ChatSession = {
-      id: tempId,
-      title: 'New Chat',
-      summary: '',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    setSessions(prev => [optimistic, ...prev])
-    setMessages([])
     setError(null)
-    setActiveId(tempId)
     setSidebarOpen(false)
     try {
       const session = await api.createSession(token)
-      setSessions(prev => prev.map(s => s.id === tempId ? session : s))
-      if (activeId === tempId) setActiveId(session.id)
+      setSessions(prev => [session, ...prev])
+      setActiveId(session.id)
+      setMessages([])
     } catch {
-      setSessions(prev => prev.filter(s => s.id !== tempId))
-      if (activeId === tempId) {
-        setActiveId(null)
-      }
+      setError('Failed to create new chat')
     }
-  }, [token, activeId])
+  }, [token])
 
   const handleDelete = useCallback(async (id: string) => {
     if (!token) return
